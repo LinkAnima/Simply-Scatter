@@ -2,7 +2,7 @@ import maya.cmds as cmds
 import random
 import math
 import time
-import uuid  # Added missing import
+import uuid
 
 # Import OpenMaya for performance and proper rotation math
 try:
@@ -14,771 +14,844 @@ except ImportError:
 class SimplyScatter:
     def __init__(self):
         self.win_id = 'simplyScatterWin'
-        self.created_materials = []  # Track materials to prevent accumulation
-        
-        # Clean up existing window
+        self.created_materials = []
+
         if cmds.window(self.win_id, exists=True):
             cmds.deleteUI(self.win_id)
-            
-        # Create window with improved layout
+
         self.window = cmds.window(
-            self.win_id, 
-            title="Simply Scatter (Boundary Safe)", 
-            widthHeight=(320, 1050)
+            self.win_id,
+            title="Simply Scatter",
+            widthHeight=(350, 1100)
         )
-        
-        # Use more organized layout
+
         self.layout = cmds.columnLayout(adj=True, rs=5, co=['both', 10])
-        
-        # Header section
+
         cmds.text(l="SIMPLY SCATTER", fn="boldLabelFont", h=40, backgroundColor=[0.2, 0.2, 0.2])
-        
-        # Scene Settings
-        self._create_scene_settings()
-        
-        # Scaling Controls
-        self._create_scaling_controls()
-        
-        # Scatter Parameters
-        self._create_scatter_parameters()
-        
-        # Clustering Zones
-        self._create_clustering_settings()
-        
-        # Virtual Subdivision Settings (Fixed)
-        self._create_virtual_subdivision_settings()
-        
-        # Rotation Variance
-        self._create_rotation_settings()
-        
-        # Proximity Detection
-        self._create_proximity_settings()
-        
-        # Advanced Features
-        self._create_advanced_features()
-        
-        # Material Assignment Section (NEW)
-        self._create_material_assignment_section()
-        
-        # Execute Button
-        cmds.button(
-            l="RUN SCATTER", 
-            c=self.execute_scatter, 
-            h=50, 
-            backgroundColor=[0.1, 0.4, 0.2]
-        )
-        
-        cmds.showWindow(self.window)
-    
-    def _create_scene_settings(self):
-        """Create scene settings section"""
+
+        # --- Scene Settings ---
         cmds.text(l="Scene Settings", al='left', fn="boldLabelFont")
         self.up_axis_ctrl = cmds.radioButtonGrp(
-            l="Object Up Axis:", 
-            numberOfRadioButtons=2, 
-            labelArray2=["Y-Up", "Z-Up"], 
-            select=1, 
+            l="Object Up Axis:",
+            numberOfRadioButtons=2,
+            labelArray2=["Y-Up", "Z-Up"],
+            select=1,
             columnAlign2=["left", "left"]
         )
+
         cmds.separator(h=10)
-    
-    def _create_scaling_controls(self):
-        """Create scaling customization section"""
-        cmds.text(l="Scaling Customization", al='left', fn="boldLabelFont")
+
+        # --- Mesh Preparation ---
+        cmds.text(l="Mesh Preparation", al='left', fn="boldLabelFont")
+        cmds.text(l="Duplicates target for higher density scatter.", fn="smallPlainLabelFont", al='center')
+
+        self.subdiv_levels_ctrl = cmds.intSliderGrp(
+            l="Subdivision Levels:",
+            f=True,
+            min=0,
+            max=8,
+            v=1,
+            step=1
+        )
+
+        self.keep_sharp_ctrl = cmds.checkBox(
+            l="Keep Sharp Edges",
+            v=True,
+            annotation="Subdivide topology only. Preserves original shape/silhouette.",
+            cc=self._on_sharp_edges_changed
+        )
+
+        self.use_smoothing_ctrl = cmds.checkBox(
+            l="Apply Smoothing",
+            v=False,
+            annotation="Subdivide with smoothing. Softens the mesh.",
+            cc=self._on_smoothing_changed
+        )
+
+        self.keep_target_copy_ctrl = cmds.checkBox(
+            l="Keep Subdivided Target",
+            v=False
+        )
+
+        cmds.separator(h=5)
+
+        # --- Scatter Parameters ---
+        cmds.text(l="Scatter Parameters", al='left', fn="boldLabelFont")
+        self.cnt_ctrl = cmds.intSliderGrp(l="Object Count", f=True, min=1, max=5000, v=100)
+        self.scl_ctrl = cmds.floatSliderGrp(l="Base Scale", f=True, min=0.01, max=20, v=1.0)
+        
+        self.uni_ctrl = cmds.checkBox(
+            l="Use Uniform Scale", 
+            v=False,
+            annotation="When enabled, all objects use the Base Scale exactly."
+        )
+
+        # Added changeCommand to trigger real-time UI update
         self.scale_min_ctrl = cmds.floatSliderGrp(
-            l="Min Scale Factor", 
-            f=True, 
-            min=0.01, 
-            max=5.0, 
-            v=0.5,  
-            precision=2
+            l="Min Scale Factor", f=True, min=0.01, max=5.0, v=0.5, precision=2,
+            changeCommand=self._update_scale_range_display
         )
         
         self.scale_max_ctrl = cmds.floatSliderGrp(
-            l="Max Scale Factor", 
-            f=True, 
-            min=0.01, 
-            max=5.0, 
-            v=1.5,  
-            precision=2
+            l="Max Scale Factor", f=True, min=0.01, max=5.0, v=1.5, precision=2,
+            changeCommand=self._update_scale_range_display
         )
-        
-        # Show current range info
+
+        # The label that will be updated in real-time
         self.scale_range_info = cmds.text(
-            l="Current Range: 50% to 150%", 
-            fn="smallPlainLabelFont", 
-            al='center'
+            l="Current Range: 50% to 150%", fn="smallPlainLabelFont", al='center'
         )
         
+        # Call once on init to ensure correct initial display
+        self._update_scale_range_display()
+
         cmds.separator(h=5)
-    
-    def _create_scatter_parameters(self):
-        """Create scatter parameters section"""
-        cmds.text(l="Scatter Parameters", al='left', fn="boldLabelFont")
-        self.cnt_ctrl = cmds.intSliderGrp(
-            l="Object Count", 
-            f=True, 
-            min=1, 
-            max=5000, 
-            v=100
-        )
-        self.scl_ctrl = cmds.floatSliderGrp(
-            l="Base Scale", 
-            f=True, 
-            min=0.01, 
-            max=20, 
-            v=1.0
-        )
-        self.uni_ctrl = cmds.checkBox(
-            l="Use Uniform Scale (No Random)", 
-            v=False
-        )
-        cmds.separator(h=5)
-    
-    def _create_clustering_settings(self):
-        """Create clustering zones section"""
+
+        # --- Clustering Zones ---
         cmds.text(l="Clustering Zones", al='left', fn="boldLabelFont")
-        self.use_cluster_ctrl = cmds.checkBox(
-            l="Enable Clustering", 
-            v=True
-        )
+        self.use_cluster_ctrl = cmds.checkBox(l="Enable Clustering", v=True)
+        
+        # Reduced Max from 100 to 25
         self.cluster_count_ctrl = cmds.intSliderGrp(
-            l="Number of Clusters", 
-            f=True, 
-            min=1, 
-            max=100, 
-            v=10
+            l="Number of Clusters", f=True, min=1, max=25, v=10
         )
+        
         self.cluster_strength_ctrl = cmds.floatSliderGrp(
-            l="Cluster Strength (Tightness)", 
+            l="Tightness",
             f=True, 
             min=0.0, 
             max=1.0, 
-            v=0.2, 
-            precision=2
+            v=0.8, 
+            precision=2,
+            annotation="0 is fully spread across mesh. 1 is clustered tightly at centers."
         )
         cmds.separator(h=5)
-    
-    def _create_virtual_subdivision_settings(self):
-        """Create virtual subdivision section with improved options"""
-        cmds.text(l="Virtual Subdivision (Boundary Safe)", al='left', fn="boldLabelFont")
+
+        # --- Slope Filtering ---
+        # 1. Removed "/" from section header
+        cmds.text(l="Slope Filtering", al='left', fn="boldLabelFont")
+        cmds.text(l="Prevents scattering on steep surfaces.", fn="smallPlainLabelFont", al='center')
+        self.use_slope_ctrl = cmds.checkBox(l="Enable Slope Filter", v=True)
         
-        # Add subdivision method selection - FIXED: Proper edge sampling
-        self.subdiv_method_ctrl = cmds.radioButtonGrp(
-            l="Subdivision Method:", 
-            numberOfRadioButtons=2, 
-            labelArray2=["Tangent Fit", "Edge Sampling"], 
-            select=1, 
-            columnAlign2=["left", "left"]
+        # 2. Removed "Max", "/", and "(Degrees)" from slider label
+        self.max_slope_ctrl = cmds.floatSliderGrp(
+            l="Angle", f=True, min=0, max=90, v=60, precision=1
         )
-        
-        self.use_vsub_ctrl = cmds.checkBox(
-            l="Enable Virtual Subdivision", 
-            v=True
-        )
-        
-        # UI Slider 0-10 mapped to 0-0.25 internally
-        self.vsub_range_ctrl = cmds.intSliderGrp(
-            l="Spread Intensity (0-10)", 
-            f=True, 
-            min=0, 
-            max=10, 
-            v=5,
-            step=1
-        )
-        cmds.text(l="Higher values spread objects further from vertices.", fn="smallPlainLabelFont", al='center')
-        cmds.text(l="Max physical offset is capped at 0.25 to prevent floating.", fn="smallPlainLabelFont", al='center')
         cmds.separator(h=5)
-    
-    def _create_rotation_settings(self):
-        """Create rotation variance section"""
+
+        # --- Rotation Variance ---
         cmds.text(l="Rotation Variance", al='left', fn="boldLabelFont")
-        self.rx_ctrl = cmds.floatSliderGrp(
-            l="X Tilt Randomness", 
-            f=True, 
-            min=0, 
-            max=360, 
-            v=15
-        )
-        self.ry_ctrl = cmds.floatSliderGrp(
-            l="Y Twist Randomness", 
-            f=True, 
-            min=0, 
-            max=360, 
-            v=360
-        )
-        self.rz_ctrl = cmds.floatSliderGrp(
-            l="Z Tilt Randomness", 
-            f=True, 
-            min=0, 
-            max=360, 
-            v=15
-        )
+        self.rx_ctrl = cmds.floatSliderGrp(l="X Tilt Randomness", f=True, min=0, max=360, v=15)
+        self.ry_ctrl = cmds.floatSliderGrp(l="Y Twist Randomness", f=True, min=0, max=360, v=360)
+        self.rz_ctrl = cmds.floatSliderGrp(l="Z Tilt Randomness", f=True, min=0, max=360, v=15)
         cmds.separator(h=5)
-    
-    def _create_proximity_settings(self):
-        """Create proximity detection section"""
+
+        # --- Proximity Detection ---
         cmds.text(l="Proximity Detection", al='left', fn="boldLabelFont")
-        self.use_proximity_ctrl = cmds.checkBox(
-            l="Enable Collision Avoidance", 
-            v=True
-        )
-        self.proximity_dist_ctrl = cmds.floatSliderGrp(
-            l="Min Distance", 
-            f=True, 
-            min=0.1, 
-            max=10.0, 
-            v=1.0
-        )
+        self.use_proximity_ctrl = cmds.checkBox(l="Enable Collision Avoidance", v=True)
+        self.proximity_dist_ctrl = cmds.floatSliderGrp(l="Min Distance", f=True, min=0.1, max=10.0, v=1.0)
+        
+        # 1. Reduced max to 10
+        # 2. Changed label to "Retries per Object"
         self.max_retries_ctrl = cmds.intSliderGrp(
-            l="Max Retries per Obj", 
+            l="Retries per Object", 
             f=True, 
             min=1, 
-            max=100, 
-            v=20
+            max=10, 
+            v=5
         )
         cmds.separator(h=5)
-    
-    def _create_advanced_features(self):
-        """Create advanced features section"""
+
+        # --- Advanced Features ---
         cmds.text(l="Advanced Features", al='left', fn="boldLabelFont")
-        self.align_ctrl = cmds.checkBox(
-            l="Align to Surface Normal", 
-            v=True
-        )
+        self.align_ctrl = cmds.checkBox(l="Align to Surface Normal", v=True)
+        
+        # 3. Removed "(Faster)"
         self.inst_ctrl = cmds.checkBox(
-            l="Use Instancing (Faster)", 
+            l="Use Instancing", 
             v=True
         )
-        cmds.separator(h=20)
-    
-    def _create_material_assignment_section(self):
-        """Create material assignment section"""
-        cmds.text(l="Material Assignment", al='left', fn="boldLabelFont")
+
         self.use_materials_ctrl = cmds.checkBox(
-            l="Assign Unique Materials to Object Types", 
-            v=False
+            l="Assign Unique Materials to Object Types", v=False
         )
-        cmds.text(
-            l="Creates one unique material per source object type.", 
-            fn="smallPlainLabelFont", 
-            al='center'
-        )
+
         cmds.separator(h=20)
+        cmds.button(l="RUN SCATTER", c=self.execute_scatter, h=50, backgroundColor=[0.1, 0.4, 0.2])
+        cmds.showWindow(self.window)
+
+    # ------------------------------------------------------------------
+    #  UI CALLBACKS
+    # ------------------------------------------------------------------
     
+    def _update_scale_range_display(self, *args):
+        """
+        Callback for the Scale Min/Max sliders.
+        Updates the 'scale_range_info' text node in real-time.
+        """
+        try:
+            min_val = cmds.floatSliderGrp(self.scale_min_ctrl, q=True, v=True)
+            max_val = cmds.floatSliderGrp(self.scale_max_ctrl, q=True, v=True)
+            
+            # Ensure min <= max for display logic (though Maya usually handles slider limits)
+            if min_val > max_val:
+                # If user drags min above max, Maya might allow it depending on setup, 
+                # but for display purposes we show the values as dragged.
+                pass 
+
+            cmds.text(self.scale_range_info, e=True,
+                      l="Current Range: {:.0f}% to {:.0f}%".format(min_val * 100, max_val * 100))
+        except Exception:
+            # Fallback if UI controls don't exist yet (e.g. during init)
+            pass
+
+    def _on_sharp_edges_changed(self, *args):
+        """
+        Sharp mode selected.
+        Always keep exactly one subdivision mode active.
+        """
+        if cmds.checkBox(self.keep_sharp_ctrl, q=True, v=True):
+            # Sharp selected -> turn smoothing OFF
+            cmds.checkBox(self.use_smoothing_ctrl, e=True, v=False)
+        else:
+            # User tried to turn Sharp OFF.
+            # If smoothing isn't ON, restore Sharp.
+            if not cmds.checkBox(self.use_smoothing_ctrl, q=True, v=True):
+                cmds.checkBox(self.keep_sharp_ctrl, e=True, v=True)
+
+    def _on_smoothing_changed(self, *args):
+        """
+        Smoothing mode selected.
+        Always keep exactly one subdivision mode active.
+        """
+        if cmds.checkBox(self.use_smoothing_ctrl, q=True, v=True):
+            # Smoothing selected -> turn Sharp OFF
+            cmds.checkBox(self.keep_sharp_ctrl, e=True, v=False)
+        else:
+            # User tried to turn Smoothing OFF.
+            # If Sharp isn't ON, restore Smoothing.
+            if not cmds.checkBox(self.keep_sharp_ctrl, q=True, v=True):
+                cmds.checkBox(self.use_smoothing_ctrl, e=True, v=True)
+
+    # ------------------------------------------------------------------
+    #  HELPER: resolve a shape node from a transform or shape name
+    # ------------------------------------------------------------------
     def get_shape_node(self, node):
-        """Helper to ensure we always get the shape node for geometry data."""
         if not cmds.objExists(node):
             return None
-            
         if cmds.objectType(node, isType='mesh'):
             return node
-            
         shapes = cmds.listRelatives(node, shapes=True, noIntermediate=True)
         if shapes:
             mesh_shapes = [s for s in shapes if cmds.objectType(s, isType='mesh')]
             if mesh_shapes:
                 return mesh_shapes[0]
-        
         return None
-    
+
+    # ------------------------------------------------------------------
+    #  MAIN EXECUTION
+    # ------------------------------------------------------------------
     def execute_scatter(self, *args):
-        """Main execution method with improved error handling and performance"""
-        # Validate selection
         selection = cmds.ls(selection=True)
-        if not selection or len(selection) < 2:
-            self._show_error("Select objects to scatter, then the Target Mesh LAST.")
+        valid_selection = [s for s in selection if cmds.objExists(s)]
+
+        if not valid_selection or len(valid_selection) < 2:
+            self._show_error("Selection Error: Select objects to scatter, then the Target Mesh LAST.")
             return
-            
-        target_node = selection[-1]
-        source_objects = selection[:-1]
-        
-        # Validate target node
+
+        target_node = valid_selection[-1]
+        source_objects = valid_selection[:-1]
+
+        if not cmds.objectType(target_node, isType='transform') and \
+           not cmds.objectType(target_node, isType='mesh'):
+            self._show_error("Target must be a Transform or Mesh.")
+            return
+
+        valid_sources = [s for s in source_objects
+                         if cmds.objectType(s, isType='transform') or
+                            cmds.objectType(s, isType='mesh')]
+        if not valid_sources:
+            self._show_error("No valid source objects.")
+            return
+
         target_shape = self.get_shape_node(target_node)
         if not target_shape:
-            self._show_error("Target selection is not a valid mesh or transform with a mesh shape.")
+            self._show_error("Target is not a valid mesh.")
             return
-        
-        # Get UI Values
+
+        # ---- Read UI values ----
         try:
-            count_val = cmds.intSliderGrp(self.cnt_ctrl, q=True, v=True)
-            scale_val = cmds.floatSliderGrp(self.scl_ctrl, q=True, v=True)
-            use_uniform = cmds.checkBox(self.uni_ctrl, q=True, v=True)
+            count_val       = cmds.intSliderGrp(self.cnt_ctrl, q=True, v=True)
+            scale_val       = cmds.floatSliderGrp(self.scl_ctrl, q=True, v=True)
+            use_uniform     = cmds.checkBox(self.uni_ctrl, q=True, v=True)
+
+            use_clustering  = cmds.checkBox(self.use_cluster_ctrl, q=True, v=True)
+            num_clusters    = cmds.intSliderGrp(self.cluster_count_ctrl, q=True, v=True)
+            cluster_strength= cmds.floatSliderGrp(self.cluster_strength_ctrl, q=True, v=True)
+
+            use_slope_filter= cmds.checkBox(self.use_slope_ctrl, q=True, v=True)
+            max_slope_angle = cmds.floatSliderGrp(self.max_slope_ctrl, q=True, v=True)
+
+            subdiv_levels   = cmds.intSliderGrp(self.subdiv_levels_ctrl, q=True, v=True)
             
-            use_clustering = cmds.checkBox(self.use_cluster_ctrl, q=True, v=True)
-            num_clusters = cmds.intSliderGrp(self.cluster_count_ctrl, q=True, v=True)
-            cluster_strength = cmds.floatSliderGrp(self.cluster_strength_ctrl, q=True, v=True)
+            use_sharp_edges = cmds.checkBox(self.keep_sharp_ctrl, q=True, v=True)
+            use_smoothing   = cmds.checkBox(self.use_smoothing_ctrl, q=True, v=True)
             
-            subdiv_method = cmds.radioButtonGrp(self.subdiv_method_ctrl, q=True, select=True)
-            use_vsub = cmds.checkBox(self.use_vsub_ctrl, q=True, v=True)
-            use_proximity = cmds.checkBox(self.use_proximity_ctrl, q=True, v=True)
-            vsub_ui_val = cmds.intSliderGrp(self.vsub_range_ctrl, q=True, v=True)
-            
-            # MAP UI 0-10 TO INTERNAL 0-0.25
-            max_physical_offset = (vsub_ui_val / 10.0) * 0.25
-            
+            keep_target_copy= cmds.checkBox(self.keep_target_copy_ctrl, q=True, v=True)
+
             rx_range = cmds.floatSliderGrp(self.rx_ctrl, q=True, v=True)
             ry_range = cmds.floatSliderGrp(self.ry_ctrl, q=True, v=True)
             rz_range = cmds.floatSliderGrp(self.rz_ctrl, q=True, v=True)
-            use_align = cmds.checkBox(self.align_ctrl, q=True, v=True)
-            use_inst = cmds.checkBox(self.inst_ctrl, q=True, v=True)
-            min_dist = cmds.floatSliderGrp(self.proximity_dist_ctrl, q=True, v=True)
-            max_retries = cmds.intSliderGrp(self.max_retries_ctrl, q=True, v=True)
-            
-            # Get custom scaling values
+
+            use_align     = cmds.checkBox(self.align_ctrl, q=True, v=True)
+            use_inst      = cmds.checkBox(self.inst_ctrl, q=True, v=True)
+            use_proximity = cmds.checkBox(self.use_proximity_ctrl, q=True, v=True)
+            min_dist      = cmds.floatSliderGrp(self.proximity_dist_ctrl, q=True, v=True)
+            max_retries   = cmds.intSliderGrp(self.max_retries_ctrl, q=True, v=True)
+
             scale_min = cmds.floatSliderGrp(self.scale_min_ctrl, q=True, v=True)
             scale_max = cmds.floatSliderGrp(self.scale_max_ctrl, q=True, v=True)
             
-            # Validate scale range
+            # Ensure logical min/max for calculation
             if scale_min > scale_max:
                 scale_min, scale_max = scale_max, scale_min
-                cmds.floatSliderGrp(self.scale_min_ctrl, e=True, v=scale_min)
-                cmds.floatSliderGrp(self.scale_max_ctrl, e=True, v=scale_max)
-            
-            # Update info text
-            cmds.text(self.scale_range_info, e=True, l="Current Range: {:.0f}% to {:.0f}%".format(
-                scale_min * 100, 
-                scale_max * 100
-            ))
-            
-            # Get up axis selection
-            up_axis = cmds.radioButtonGrp(self.up_axis_ctrl, q=True, select=True)
-            
-            # Get material assignment setting
+
+            up_axis       = cmds.radioButtonGrp(self.up_axis_ctrl, q=True, select=True)
             use_materials = cmds.checkBox(self.use_materials_ctrl, q=True, v=True)
-            
+
         except Exception as e:
-            self._show_error("Error reading UI values: {}".format(str(e)))
+            self._show_error("Error reading UI: {}".format(str(e)))
             return
-        
-        # Setup Group with UUID to avoid conflicts
+
+        # ---- Result group ----
         group_name = "SimplyScatter_Result_GRP_{}".format(uuid.uuid4().hex[:8])
         result_grp = cmds.group(em=True, name=group_name)
-        
-        # Wrap in undo chunk for proper Maya behavior
+
+        temp_scatter_transform = None
+
         try:
             cmds.undoInfo(openChunk=True)
-            
-            # PRE-CALCULATION PHASE
-            
-            # Get Bounding Box
-            bbox = cmds.exactWorldBoundingBox(target_shape)
-            diag_x = bbox[3] - bbox[0]
-            diag_y = bbox[4] - bbox[1]
-            diag_z = bbox[5] - bbox[2]
-            mesh_diagonal = math.sqrt(diag_x**2 + diag_y**2 + diag_z**2)
-            
-            # Get All Vertex Positions and Normals using OpenMaya for performance
-            all_vtx_positions = []
-            all_vtx_normals = []
-            
+
+            # =========================================================
+            #  PHASE 1: Create temporary subdivided mesh
+            # =========================================================
+            dup_name = "Temp_Scatter_Mesh_{}".format(uuid.uuid4().hex[:6])
+
+            try:
+                dup_result = cmds.duplicate(target_node, name=dup_name)
+                if dup_result:
+                    first_item = dup_result[0]
+                    if cmds.objectType(first_item, isType='transform'):
+                        temp_scatter_transform = first_item
+                    else:
+                        parents = cmds.listRelatives(first_item, parent=True, noIntermediate=True)
+                        if parents:
+                            temp_scatter_transform = parents[0]
+                else:
+                    raise Exception("Duplicate returned empty list.")
+            except Exception as e:
+                self._show_error("Failed to duplicate target: {}".format(str(e)))
+                cmds.delete(result_grp)
+                return
+
+            if not temp_scatter_transform or not cmds.objExists(temp_scatter_transform):
+                self._show_error("Duplicate creation failed.")
+                cmds.delete(result_grp)
+                return
+
+            work_shape = self.get_shape_node(temp_scatter_transform)
+            if not work_shape:
+                self._show_error("Could not get shape from duplicate.")
+                cmds.delete(result_grp)
+                return
+
+            # Bounding box for boundary checks (before subd)
+            bbox = cmds.exactWorldBoundingBox(work_shape)
+            if bbox:
+                bbox_min = [bbox[0], bbox[1], bbox[2]]
+                bbox_max = [bbox[3], bbox[4], bbox[5]]
+                margin = 0.01 * (bbox[3] - bbox[0]) if (bbox[3] - bbox[0]) > 0 else 0.01
+                bbox_min = [bbox_min[0] - margin, bbox_min[1] - margin, bbox_min[2] - margin]
+                bbox_max = [bbox_max[0] + margin, bbox_max[1] + margin, bbox_max[2] + margin]
+            else:
+                bbox_min = [-1000, -1000, -1000]
+                bbox_max = [1000, 1000, 1000]
+
+            # =========================================================
+            #  PHASE 1A: SUBDIVIDE THE TEMPORARY SCATTER MESH
+            # =========================================================
+            if subdiv_levels > 0:
+                try:
+                    # SHARP / NO SMOOTHING MODE
+                    if use_sharp_edges:
+                        cmds.polySmooth(
+                            work_shape,
+                            divisions=subdiv_levels,
+                            continuity=0.0,
+                            keepBorder=True,
+                            keepHardEdge=True,
+                            propagateEdgeHardness=True,
+                            constructionHistory=False
+                        )
+
+                    # CATMULL-CLARK SMOOTHING MODE
+                    elif use_smoothing:
+                        cmds.polySmooth(
+                            work_shape,
+                            divisions=subdiv_levels,
+                            continuity=1.0,
+                            keepBorder=True,
+                            keepHardEdge=False,
+                            propagateEdgeHardness=True,
+                            constructionHistory=False
+                        )
+
+                    # SAFETY FALLBACK
+                    else:
+                        cmds.polySmooth(
+                            work_shape,
+                            divisions=subdiv_levels,
+                            continuity=0.0,
+                            keepBorder=True,
+                            keepHardEdge=True,
+                            propagateEdgeHardness=True,
+                            constructionHistory=False
+                        )
+
+                except Exception as e:
+                    self._show_error("Subdivision failed: {}".format(str(e)))
+                    if temp_scatter_transform and cmds.objExists(temp_scatter_transform):
+                        cmds.delete(temp_scatter_transform)
+                    if cmds.objExists(result_grp):
+                        cmds.delete(result_grp)
+                    return
+
+            # Re-fetch shape (stays as 'mesh' type with polySmooth)
+            temp_scatter_mesh = self.get_shape_node(temp_scatter_transform)
+            if not temp_scatter_mesh:
+                self._show_error("Invalid final mesh after subd.")
+                if temp_scatter_transform and cmds.objExists(temp_scatter_transform):
+                    cmds.delete(temp_scatter_transform)
+                cmds.delete(result_grp)
+                return
+
+            cmds.setAttr(temp_scatter_transform + ".visibility", 0)
+
+            if keep_target_copy:
+                cmds.parent(temp_scatter_transform, result_grp)
+
+            # =========================================================
+            #  PHASE 2: Extract vertex data
+            # =========================================================
             if HAS_OPENMAYA:
                 try:
-                    all_vtx_positions, all_vtx_normals = self._get_vertex_data_optimized(target_shape)
+                    all_vtx_positions, all_vtx_normals = self._get_vertex_data_optimized(temp_scatter_mesh)
                 except Exception as e:
-                    print("OpenMaya error, falling back to standard Maya API: {}".format(str(e)))
-                    all_vtx_positions, all_vtx_normals = self._get_vertex_data_standard(target_shape)
+                    print("OpenMaya failed, using fallback: {}".format(str(e)))
+                    all_vtx_positions, all_vtx_normals = self._get_vertex_data_standard(temp_scatter_mesh)
             else:
-                all_vtx_positions, all_vtx_normals = self._get_vertex_data_standard(target_shape)
-            
-            # Determine Cluster Centers (Indices)
+                all_vtx_positions, all_vtx_normals = self._get_vertex_data_standard(temp_scatter_mesh)
+
+            if not all_vtx_positions:
+                self._show_error("No vertices found on subdivided mesh.")
+                if temp_scatter_transform and cmds.objExists(temp_scatter_transform):
+                    cmds.delete(temp_scatter_transform)
+                cmds.delete(result_grp)
+                return
+
+            # Pre-calculate slopes if filtering is enabled
+            if use_slope_filter and HAS_OPENMAYA:
+                up_vector = om.MVector(0, 1, 0) if up_axis == 1 else om.MVector(0, 0, 1)
+                all_vtx_slopes = []
+                for i in range(len(all_vtx_positions)):
+                    n = all_vtx_normals[i]
+                    length = math.sqrt(n[0]**2 + n[1]**2 + n[2]**2)
+                    if length > 0:
+                        n_norm = om.MVector(n[0]/length, n[1]/length, n[2]/length)
+                        angle_deg = math.degrees(up_vector.angle(n_norm))
+                        all_vtx_slopes.append(angle_deg)
+                    else:
+                        all_vtx_slopes.append(0.0)
+            elif use_slope_filter:
+                all_vtx_slopes = [0.0] * len(all_vtx_positions)
+            else:
+                all_vtx_slopes = [0.0] * len(all_vtx_positions)
+
+            mesh_diagonal = self._get_mesh_diagonal(temp_scatter_mesh)
+
+            # ---- Determine cluster centers ----
             cluster_centers_indices = []
             if use_clustering:
                 actual_clusters = min(num_clusters, len(all_vtx_positions))
-                cluster_centers_indices = random.sample(range(len(all_vtx_positions)), actual_clusters)
+                if use_slope_filter:
+                    valid_indices = [i for i in range(len(all_vtx_positions))
+                                     if all_vtx_slopes[i] <= max_slope_angle]
+                    if valid_indices:
+                        cluster_centers_indices = random.sample(valid_indices,
+                                                               min(actual_clusters, len(valid_indices)))
+                    else:
+                        cluster_centers_indices = list(range(len(all_vtx_positions)))
+                else:
+                    cluster_centers_indices = random.sample(range(len(all_vtx_positions)), actual_clusters)
             else:
                 cluster_centers_indices = list(range(len(all_vtx_positions)))
-            
-            # Create materials if enabled - CLEANUP PREVIOUS MATERIALS FIRST
+
+            # ---- Materials ----
             material_dict = {}
             if use_materials:
-                # Clean up existing materials from previous runs
                 self._cleanup_scatter_materials()
-                material_dict = self._create_unique_materials(source_objects)
-            
-            # Storage for placed positions and spatial grid
-            placed_positions = [] 
+                material_dict = self._create_unique_materials(valid_sources)
+
+            # ---- Placement ----
+            placed_positions = []
             success_count = 0
             failed_count = 0
-            
-            # Progress Bar Setup for Placement
-            if cmds.progressWindow(query=True, exists=True):
-                cmds.progressWindow(endProgress=True)
-                
-            cmds.progressWindow(
-                title="Simply Scatter", 
-                progress=0, 
-                maxProgress=count_val, 
-                status="Placing Objects...", 
-                isInterruptable=True
-            )
-            
+
+            grid_size = min_dist if use_proximity else 100
+            grid = {}
+
+            cmds.progressWindow(title="Simply Scatter", progress=0,
+                                maxProgress=count_val,
+                                status="Placing Objects...", isInterruptable=True)
+
             try:
-                # Create spatial hash grid for proximity checking (optimization)
-                grid_size = min_dist
-                grid = {}
-                
-                # Place objects with optimized logic
                 for i in range(count_val):
                     if cmds.progressWindow(query=True, isCancelled=True):
                         break
-                    
-                    # Update progress every 25 objects to reduce UI overhead
                     if i % 25 == 0:
                         cmds.progressWindow(edit=True, progress=i)
-                        
-                    # Call the method with all necessary parameters including scale_min and scale_max
+
                     placed = self._place_object(
-                        target_shape=target_shape,
-                        source_objects=source_objects,
+                        source_objects=valid_sources,
                         all_vtx_positions=all_vtx_positions,
                         all_vtx_normals=all_vtx_normals,
+                        all_vtx_slopes=all_vtx_slopes,
                         cluster_centers_indices=cluster_centers_indices,
                         mesh_diagonal=mesh_diagonal,
                         use_clustering=use_clustering,
                         num_clusters=num_clusters,
                         cluster_strength=cluster_strength,
-                        max_physical_offset=max_physical_offset,
-                        rx_range=rx_range,
-                        ry_range=ry_range,
-                        rz_range=rz_range,
+                        rx_range=rx_range, ry_range=ry_range, rz_range=rz_range,
                         use_align=use_align,
                         use_inst=use_inst,
                         use_proximity=use_proximity,
-                        min_dist=min_dist,
-                        max_retries=max_retries,
+                        min_dist=min_dist, max_retries=max_retries,
                         placed_positions=placed_positions,
                         result_grp=result_grp,
-                        subdiv_method=subdiv_method,
-                        scale_min=scale_min,
-                        scale_max=scale_max,
+                        scale_min=scale_min, scale_max=scale_max,
                         material_dict=material_dict,
                         use_uniform=use_uniform,
                         use_materials=use_materials,
-                        scale_val=scale_val,  # Added this parameter
-                        use_vsub=use_vsub,    # FIXED: Add missing parameter
-                        grid=grid,            # FIXED: Add spatial hash for proximity
-                        grid_size=grid_size,   # FIXED: Add grid size
-                        up_axis=up_axis       # FIXED: Pass up axis selection
+                        scale_val=scale_val,
+                        up_axis=up_axis,
+                        grid=grid, grid_size=grid_size,
+                        use_slope_filter=use_slope_filter,
+                        max_slope_angle=max_slope_angle,
+                        bbox_min=bbox_min, bbox_max=bbox_max
                     )
-                    
+
                     if placed:
                         success_count += 1
                     else:
                         failed_count += 1
-                        
+
             except Exception as e:
-                self._show_error("Error during object placement: {}".format(str(e)))
+                self._show_error("Error during placement: {}".format(str(e)))
             finally:
                 cmds.progressWindow(endProgress=True)
-            
+
+            # ---- Cleanup ----
+            if not keep_target_copy:
+                if temp_scatter_transform and cmds.objExists(temp_scatter_transform):
+                    cmds.delete(temp_scatter_transform)
+
             print("Simply Scatter Complete: {} placed, {} failed.".format(success_count, failed_count))
-            
+
         finally:
             cmds.undoInfo(closeChunk=True)
-    
+
+    # ------------------------------------------------------------------
+    #  VERTEX DATA (standard Maya cmds)
+    # ------------------------------------------------------------------
     def _get_vertex_data_standard(self, target_shape):
-        """Standard Maya API vertex data retrieval"""
         all_vtx_positions = []
         all_vtx_normals = []
-        
+
+        if not target_shape or not cmds.objExists(target_shape):
+            return [], []
+
         try:
             vtx_count = cmds.polyEvaluate(target_shape, vertex=True)
         except Exception as e:
-            self._show_error("Could not evaluate vertices on target shape: {}".format(str(e)))
+            self._show_error("Could not evaluate vertices: {}".format(str(e)))
             return [], []
-            
+
         if vtx_count <= 0:
-            self._show_error("No vertices found on target.")
             return [], []
-        
-        # Cache vertex data for better performance
-        if cmds.progressWindow(query=True, exists=True):
-            cmds.progressWindow(endProgress=True)
-            
-        cmds.progressWindow(
-            title="Simply Scatter", 
-            progress=0, 
-            maxProgress=vtx_count, 
-            status="Pre-calculating Mesh Data...", 
-            isInterruptable=True
-        )
-        
-        try:
-            # Update every 100 vertices to reduce UI overhead
-            for v_idx in range(vtx_count):
-                if cmds.progressWindow(query=True, isCancelled=True):
-                    break
-                
-                if v_idx % 100 == 0:
-                    cmds.progressWindow(edit=True, progress=v_idx)
-                
-                vtx_path = "{}.vtx[{}]".format(target_shape, v_idx)
-                pos = cmds.xform(vtx_path, q=True, ws=True, t=True)
-                
-                # Get normal more efficiently
-                try:
-                    norm_data = cmds.polyNormalPerVertex(target_shape, query=True, vector=True, index=v_idx)
-                    if norm_data and len(norm_data) > 0:
-                        n_x, n_y, n_z = norm_data[0][0], norm_data[0][1], norm_data[0][2]
-                    else:
-                        n_x, n_y, n_z = 0, 1, 0
-                except Exception as e:
-                    # Log error but continue with default normal
-                    print("Warning: Failed to get vertex normal for index {}: {}".format(v_idx, str(e)))
+
+        for v_idx in range(vtx_count):
+            vtx_path = "{}.vtx[{}]".format(target_shape, v_idx)
+            if not cmds.objExists(vtx_path):
+                continue
+            pos = cmds.xform(vtx_path, q=True, ws=True, t=True)
+            try:
+                norm_data = cmds.polyNormalPerVertex(vtx_path, query=True, xyz=True)
+                if norm_data and len(norm_data) > 0:
+                    n_x, n_y, n_z = norm_data[0], norm_data[1], norm_data[2]
+                else:
                     n_x, n_y, n_z = 0, 1, 0
-                    
-                all_vtx_positions.append(pos)
-                all_vtx_normals.append([n_x, n_y, n_z])
-                
-        finally:
-            cmds.progressWindow(endProgress=True)
-            
+            except:
+                n_x, n_y, n_z = 0, 1, 0
+            all_vtx_positions.append(pos)
+            all_vtx_normals.append([n_x, n_y, n_z])
+
         return all_vtx_positions, all_vtx_normals
-    
+
+    # ------------------------------------------------------------------
+    #  VERTEX DATA (OpenMaya – faster)
+    # ------------------------------------------------------------------
     def _get_vertex_data_optimized(self, target_shape):
-        """Optimized OpenMaya vertex data retrieval - FIXED IMPLEMENTATION"""
         all_vtx_positions = []
         all_vtx_normals = []
-        
+
         try:
-            # FIXED: Proper OpenMaya implementation
-            selection = om.MSelectionList()
-            selection.add(target_shape)
-            
-            dag_path = selection.getDagPath(0)
+            sel = om.MSelectionList()
+            sel.add(target_shape)
+            dag_path = sel.getDagPath(0)
             mesh_fn = om.MFnMesh(dag_path)
-            
-            # Get all vertex positions in bulk
+
             points = mesh_fn.getPoints(om.MSpace.kWorld)
             point_count = len(points)
-            
-            # Get normals in bulk  
             normals = mesh_fn.getVertexNormals(False, om.MSpace.kWorld)
-            
-            # Convert to standard list format
+
             for i in range(point_count):
                 pos = [points[i].x, points[i].y, points[i].z]
                 norm = [normals[i].x, normals[i].y, normals[i].z]
                 all_vtx_positions.append(pos)
                 all_vtx_normals.append(norm)
-                
         except Exception as e:
-            # Fall back to standard method if OpenMaya fails
-            raise Exception("OpenMaya vertex data error: {}".format(str(e)))
-            
+            raise Exception("OpenMaya error: {}".format(str(e)))
+
         return all_vtx_positions, all_vtx_normals
-    
-    def _place_object(self, target_shape, source_objects, all_vtx_positions, all_vtx_normals,
-                     cluster_centers_indices, mesh_diagonal, use_clustering, num_clusters,
-                     cluster_strength, max_physical_offset, rx_range, ry_range, rz_range,
-                     use_align, use_inst, use_proximity, min_dist, max_retries, placed_positions,
-                     result_grp, subdiv_method, scale_min, scale_max, material_dict, use_uniform,
-                     use_materials, scale_val, use_vsub, grid, grid_size, up_axis):
-        """Place a single object with improved logic"""
+
+    # ------------------------------------------------------------------
+    #  MESH DIAGONAL
+    # ------------------------------------------------------------------
+    def _get_mesh_diagonal(self, mesh_shape):
+        try:
+            bbox = cmds.exactWorldBoundingBox(mesh_shape)
+            if not bbox or len(bbox) < 6:
+                return 1.0
+            dx = bbox[3] - bbox[0]
+            dy = bbox[4] - bbox[1]
+            dz = bbox[5] - bbox[2]
+            return math.sqrt(dx*dx + dy*dy + dz*dz)
+        except:
+            return 1.0
+
+    # ------------------------------------------------------------------
+    #  BOUNDARY CHECK
+    # ------------------------------------------------------------------
+    def _is_within_bounds(self, pos, bbox_min, bbox_max):
+        return (
+            bbox_min[0] <= pos[0] <= bbox_max[0] and
+            bbox_min[1] <= pos[1] <= bbox_max[1] and
+            bbox_min[2] <= pos[2] <= bbox_max[2]
+        )
+
+    # ------------------------------------------------------------------
+    #  PLACE SINGLE OBJECT
+    # ------------------------------------------------------------------
+    def _place_object(self, source_objects, all_vtx_positions, all_vtx_normals,
+                      all_vtx_slopes, cluster_centers_indices, mesh_diagonal,
+                      use_clustering, num_clusters, cluster_strength,
+                      rx_range, ry_range, rz_range,
+                      use_align, use_inst, use_proximity, min_dist,
+                      max_retries, placed_positions, result_grp,
+                      scale_min, scale_max, material_dict, use_uniform,
+                      use_materials, scale_val, up_axis, grid, grid_size,
+                      use_slope_filter, max_slope_angle, bbox_min, bbox_max):
+
         placed = False
         attempts = 0
-        
-        # Precompute squared distance for optimization
         min_dist_sq = min_dist * min_dist
-        
+
+        if not all_vtx_positions or not source_objects:
+            return False
+
+        final_vtx_idx = None
+
         while not placed and attempts < max_retries:
             attempts += 1
-            
-            # Pick a Cluster Center Index
-            current_center_idx = random.choice(cluster_centers_indices)
-            center_pos = all_vtx_positions[current_center_idx]
-            
-            # Determine Placement Vertex based on Strength
-            max_spread_dist = cluster_strength * mesh_diagonal
-            
-            if cluster_strength == 0.0:
-                final_vtx_idx = current_center_idx
-            else:
-                found_valid = False
-                for _ in range(20):
-                    candidate_idx = random.randint(0, len(all_vtx_positions) - 1)
-                    candidate_pos = all_vtx_positions[candidate_idx]
-                    
-                    dist_sq = self._calculate_distance_squared(
-                        candidate_pos, 
-                        center_pos
-                    )
-                    
-                    if dist_sq <= max_spread_dist * max_spread_dist:
-                        final_vtx_idx = candidate_idx
-                        found_valid = True
-                        break
-                
-                if not found_valid:
+
+            # ---- 1. Determine candidate vertex ----
+            if use_clustering:
+                if not cluster_centers_indices:
+                    continue
+                current_center_idx = random.choice(cluster_centers_indices)
+                center_pos = all_vtx_positions[current_center_idx]
+
+                # 1.0 = tight, 0.0 = spread
+                spread_factor = 1.0 - cluster_strength
+                max_spread_dist = spread_factor * mesh_diagonal
+                max_spread_sq = max_spread_dist * max_spread_dist
+
+                if cluster_strength == 1.0:
                     final_vtx_idx = current_center_idx
-            
-            # Get Base Position and Normal for Final Vertex
+                else:
+                    found_valid = False
+                    search_attempts = 10 + int((1.0 - cluster_strength) * 30)
+                    for _ in range(search_attempts):
+                        candidate_idx = random.randint(0, len(all_vtx_positions) - 1)
+                        candidate_pos = all_vtx_positions[candidate_idx]
+                        dist_sq = self._calculate_distance_squared(candidate_pos, center_pos)
+                        if dist_sq <= max_spread_sq:
+                            final_vtx_idx = candidate_idx
+                            found_valid = True
+                            break
+                    if not found_valid:
+                        final_vtx_idx = current_center_idx
+            else:
+                final_vtx_idx = random.randint(0, len(all_vtx_positions) - 1)
+
+            if final_vtx_idx is None or final_vtx_idx >= len(all_vtx_positions):
+                continue
+
+            # ---- 2. Slope filter ----
+            if use_slope_filter:
+                if all_vtx_slopes[final_vtx_idx] > max_slope_angle:
+                    continue
+
             base_pos = all_vtx_positions[final_vtx_idx]
+
+            # ---- 3. Boundary safety ----
+            if not self._is_within_bounds(base_pos, bbox_min, bbox_max):
+                continue
+
             n_x, n_y, n_z = all_vtx_normals[final_vtx_idx]
-            
-            # Virtual Subdivision based on method - FIXED: use_vsub not use_proximity
             final_pos = list(base_pos)
-            
-            if use_vsub and max_physical_offset > 0:  # FIXED LOGIC
-                # Apply subdivision method
-                if subdiv_method == 1:  # Tangent Fit (original approach)
-                    final_pos = self._apply_tangent_fit(
-                        base_pos, 
-                        n_x, n_y, n_z, 
-                        max_physical_offset
-                    )
-                elif subdiv_method == 2:  # Edge Sampling (real implementation)
-                    final_pos = self._apply_edge_sampling(
-                        target_shape,
-                        all_vtx_positions,  # FIXED: Now properly passed
-                        base_pos,
-                        n_x, n_y, n_z,
-                        max_physical_offset,
-                        final_vtx_idx  # NEW: Pass vertex index for better edge sampling
-                    )
-            
-            # Check Proximity using spatial hash for better performance
+
+            # ---- 4. Proximity check ----
             if use_proximity:
-                # Use spatial hash to reduce proximity checks from O(N^2) to O(N)
-                if self._check_proximity_optimized(final_pos, placed_positions, min_dist, grid, grid_size, min_dist_sq):
+                if self._check_proximity_optimized(final_pos, placed_positions,
+                                                   min_dist, grid, grid_size, min_dist_sq):
                     placed = True
                 else:
-                    # Spot taken. Retry with new cluster center
                     continue
             else:
-                placed = True 
-            
+                placed = True
+
             if placed:
-                # Create Object
                 source_pick = random.choice(source_objects)
-                if use_inst and not use_materials:  # FIXED: Only instance when no materials needed
+
+                if use_inst and not use_materials:
                     new_item = cmds.instance(source_pick)[0]
                 else:
-                    # Force duplication when materials are required
                     new_item = cmds.duplicate(source_pick)[0]
-                
+
+                cmds.xform(new_item, translation=(0, 0, 0),
+                           rotation=(0, 0, 0), scale=(1, 1, 1), worldSpace=False)
+
                 cmds.parent(new_item, result_grp)
                 cmds.xform(new_item, translation=final_pos, worldSpace=True)
-                
-                # Rotation Logic - FIXED: Proper alignment with normal vectors using OpenMaya
+
+                # Rotation
                 if use_align:
-                    # Use actual rotation math with normal vector via OpenMaya
                     rot_x, rot_y, rot_z = self._compute_rotation_from_normal(
-                        n_x, n_y, n_z, 
-                        rx_range, ry_range, rz_range,
-                        up_axis  # FIXED: Pass up axis selection
+                        n_x, n_y, n_z, rx_range, ry_range, rz_range, up_axis
                     )
                     cmds.xform(new_item, rotation=(rot_x, rot_y, rot_z), worldSpace=True)
                 else:
-                    rx = random.uniform(-(rx_range/2), (rx_range/2))
-                    ry = random.uniform(-(ry_range/2), (ry_range/2))
-                    rz = random.uniform(-(rz_range/2), (rz_range/2))
+                    rx = random.uniform(-(rx_range/2), rx_range/2)
+                    ry = random.uniform(-(ry_range/2), ry_range/2)
+                    rz = random.uniform(-(rz_range/2), rz_range/2)
                     cmds.xform(new_item, rotation=(rx, ry, rz), worldSpace=True)
-                
+
                 # Scale
                 if use_uniform:
-                    s = scale_val  # FIXED: Use passed parameter
+                    s = scale_val
                 else:
-                    s = random.uniform(scale_min, scale_max)  # FIXED: Use correct range
+                    s = random.uniform(scale_min, scale_max)
                 cmds.scale(s, s, s, new_item)
-                
-                # Assign material if enabled
+
+                # Material
                 if use_materials and source_pick in material_dict:
                     mat_info = material_dict[source_pick]
                     try:
-                        # Assign the material to this instance/duplicate using existing SG
                         cmds.sets(new_item, e=True, forceElement=mat_info['shading_group'])
-                    except Exception as e:
-                        print("Material assignment error:", str(e))
-                
-                # Add to spatial hash for proximity checking
+                    except:
+                        pass
+
                 self._add_to_spatial_grid(final_pos, grid, grid_size)
                 placed_positions.append(final_pos)
                 return True
-        
+
         return False
-    
+
+    # ------------------------------------------------------------------
+    #  ROTATION FROM NORMAL (OpenMaya quaternion)
+    # ------------------------------------------------------------------
     def _compute_rotation_from_normal(self, n_x, n_y, n_z, rx_range, ry_range, rz_range, up_axis):
-        """Compute proper rotation from normal vector using OpenMaya for accurate math"""
-        # Normalize the input normal
         length = math.sqrt(n_x*n_x + n_y*n_y + n_z*n_z)
         if length > 0:
             n_x /= length
             n_y /= length
             n_z /= length
-        
-        # Use OpenMaya for proper rotation calculation - FIXED: No special case needed
+
         if HAS_OPENMAYA:
             try:
-                # Choose up vector based on UI selection
-                if up_axis == 1:  # Y-Up (default)
+                if up_axis == 1:
                     up_vector = om.MVector(0, 1, 0)
-                else:  # Z-Up
+                else:
                     up_vector = om.MVector(0, 0, 1)
-                
+
                 normal_vector = om.MVector(n_x, n_y, n_z)
-                
-                # Calculate rotation quaternion to align up vector with normal
+
+                if abs(normal_vector.x) + abs(normal_vector.y) + abs(normal_vector.z) < 1e-6:
+                    return 0, 0, 0
+
                 quat = up_vector.rotateTo(normal_vector)
-                
-                # Convert to Euler rotation (XYZ order)
                 euler_rotation = quat.asEulerRotation()
-                
-                # Convert from radians to degrees
+
                 rot_x = math.degrees(euler_rotation.x)
-                rot_y = math.degrees(euler_rotation.y) 
+                rot_y = math.degrees(euler_rotation.y)
                 rot_z = math.degrees(euler_rotation.z)
-                
-                # Add random variance
-                rot_x += random.uniform(-(rx_range/2), (rx_range/2))
-                rot_y += random.uniform(-(ry_range/2), (ry_range/2))
-                rot_z += random.uniform(-(rz_range/2), (rz_range/2))
-                
+
+                rot_x += random.uniform(-(rx_range/2), rx_range/2)
+                rot_y += random.uniform(-(ry_range/2), ry_range/2)
+                rot_z += random.uniform(-(rz_range/2), rz_range/2)
+
                 return rot_x, rot_y, rot_z
-                
-            except Exception as e:
-                # Fallback to simple approach if OpenMaya fails
-                print("OpenMaya rotation error, falling back: {}".format(str(e)))
-        
-        # Fallback approach - still better than nothing
-        rot_x = random.uniform(-(rx_range/2), (rx_range/2))
-        rot_y = random.uniform(-(ry_range/2), (ry_range/2))
-        rot_z = random.uniform(-(rz_range/2), (rz_range/2))
-        
+            except:
+                pass
+
+        rot_x = random.uniform(-(rx_range/2), rx_range/2)
+        rot_y = random.uniform(-(ry_range/2), ry_range/2)
+        rot_z = random.uniform(-(rz_range/2), rz_range/2)
         return rot_x, rot_y, rot_z
-    
+
+    # ------------------------------------------------------------------
+    #  SPATIAL GRID PROXIMITY
+    # ------------------------------------------------------------------
     def _calculate_distance_squared(self, pos1, pos2):
-        """Calculate squared distance between two points (faster)"""
         dx = pos1[0] - pos2[0]
         dy = pos1[1] - pos2[1]
         dz = pos1[2] - pos2[2]
         return dx*dx + dy*dy + dz*dz
-    
-    def _calculate_distance(self, pos1, pos2):
-        """Calculate distance between two points"""
-        return math.sqrt(
-            (pos1[0] - pos2[0])**2 +
-            (pos1[1] - pos2[1])**2 +
-            (pos1[2] - pos2[2])**2
-        )
-    
-    def _check_proximity_optimized(self, new_pos, existing_positions, min_dist, grid, grid_size, min_dist_sq):
-        """Optimized proximity checking using spatial hashing"""
-        # If we don't have a grid yet, do simple O(N) check (shouldn't happen in practice)
+
+    def _check_proximity_optimized(self, new_pos, existing_positions, min_dist,
+                                   grid, grid_size, min_dist_sq):
         if not grid or grid_size <= 0:
             for existing_pos in existing_positions:
                 dist_sq = self._calculate_distance_squared(new_pos, existing_pos)
                 if dist_sq < min_dist_sq:
                     return False
             return True
-        
-        # Use spatial hash to reduce comparisons
+
         cell_x = int(math.floor(new_pos[0] / grid_size))
         cell_y = int(math.floor(new_pos[1] / grid_size))
         cell_z = int(math.floor(new_pos[2] / grid_size))
-        
-        # Check nearby cells in the grid (3x3x3 neighborhood)
+
         for dx in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
                 for dz in [-1, 0, 1]:
@@ -788,257 +861,74 @@ class SimplyScatter:
                             dist_sq = self._calculate_distance_squared(new_pos, existing_pos)
                             if dist_sq < min_dist_sq:
                                 return False
-        
         return True
-    
+
     def _add_to_spatial_grid(self, pos, grid, grid_size):
-        """Add position to spatial hash grid"""
         if grid_size <= 0:
             return
-            
-        # Use math.floor for proper negative coordinate handling
         cell_x = int(math.floor(pos[0] / grid_size))
         cell_y = int(math.floor(pos[1] / grid_size))
         cell_z = int(math.floor(pos[2] / grid_size))
-        
         cell_key = (cell_x, cell_y, cell_z)
         if cell_key not in grid:
             grid[cell_key] = []
         grid[cell_key].append(pos)
-    
-    def _compute_tangent_basis(self, n_x, n_y, n_z):
-        """Compute tangent and bitangent vectors from normal - shared code"""
-        # Find an arbitrary vector not parallel to normal
-        if abs(n_y) < 0.9:
-            arbitrary = [1, 0, 0]
-        else:
-            arbitrary = [0, 1, 0]
-        
-        # Calculate tangent and bitangent vectors
-        t_x = arbitrary[1]*n_z - arbitrary[2]*n_y
-        t_y = arbitrary[2]*n_x - arbitrary[0]*n_z
-        t_z = arbitrary[0]*n_y - arbitrary[1]*n_x
-        
-        # Normalize tangent vector
-        t_len = math.sqrt(t_x**2 + t_y**2 + t_z**2)
-        if t_len > 0:
-            t_x /= t_len
-            t_y /= t_len
-            t_z /= t_len
-        else:
-            t_x, t_y, t_z = 1, 0, 0
-        
-        # Calculate bitangent vector
-        b_x = n_y*t_z - n_z*t_y
-        b_y = n_z*t_x - n_x*t_z
-        b_z = n_x*t_y - n_y*t_x
-        
-        # Normalize bitangent vector
-        b_len = math.sqrt(b_x**2 + b_y**2 + b_z**2)
-        if b_len > 0:
-            b_x /= b_len
-            b_y /= b_len
-            b_z /= b_len
-        else:
-            b_x, b_y, b_z = 0, 1, 0
-        
-        return t_x, t_y, t_z, b_x, b_y, b_z
-    
-    def _apply_tangent_fit(self, base_pos, n_x, n_y, n_z, max_offset):
-        """Apply tangent fit with optimized vector math"""
-        # Use shared tangent basis computation
-        t_x, t_y, t_z, b_x, b_y, b_z = self._compute_tangent_basis(n_x, n_y, n_z)
-        
-        # Generate random offset in tangent plane
-        rand_t = random.uniform(-max_offset, max_offset)
-        rand_b = random.uniform(-max_offset, max_offset)
-        
-        # Apply offset
-        final_pos = [
-            base_pos[0] + t_x * rand_t + b_x * rand_b,
-            base_pos[1] + t_y * rand_t + b_y * rand_b,
-            base_pos[2] + t_z * rand_t + b_z * rand_b
-        ]
-        
-        return final_pos
-    
-    def _apply_edge_sampling(self, target_shape, all_vtx_positions, base_pos, n_x, n_y, n_z, max_offset, final_vtx_idx):
-        """Apply edge sampling with better locality - IMPROVED VERSION"""
-        try:
-            # Get connected edges for better edge sampling locality
-            if HAS_OPENMAYA:
-                try:
-                    selection = om.MSelectionList()
-                    selection.add(target_shape)
-                    dag_path = selection.getDagPath(0)
-                    mesh_fn = om.MFnMesh(dag_path)
-                    
-                    # Get all edges connected to the final vertex for better locality
-                    connected_edges = []
-                    edge_it = om.MItMeshEdge(dag_path)
-                    
-                    # Find all edges connected to this vertex (FIXED: proper edge connection logic)
-                    while not edge_it.isDone():
-                        v1 = edge_it.vertexId(0)
-                        v2 = edge_it.vertexId(1)
-                        
-                        if v1 == final_vtx_idx or v2 == final_vtx_idx:
-                            connected_edges.append(edge_it.index())
-                        edge_it.next()
-                    
-                    if connected_edges and len(connected_edges) > 0:
-                        # Select one of the connected edges
-                        random_edge_idx = random.choice(connected_edges)
-                        
-                        # Reset iterator to find this specific edge
-                        edge_it.reset(dag_path)
-                        while not edge_it.isDone():
-                            if edge_it.index() == random_edge_idx:
-                                break
-                            edge_it.next()
-                        
-                        # Get vertices of the selected connected edge
-                        v1_idx = edge_it.vertexId(0)
-                        v2_idx = edge_it.vertexId(1)
-                        
-                        # Get positions of both vertices from passed array
-                        v1_pos = all_vtx_positions[v1_idx]
-                        v2_pos = all_vtx_positions[v2_idx]
-                        
-                        # Sample midpoint of edge with random offset in tangent plane
-                        mid_x = (v1_pos[0] + v2_pos[0]) / 2.0
-                        mid_y = (v1_pos[1] + v2_pos[1]) / 2.0
-                        mid_z = (v1_pos[2] + v2_pos[2]) / 2.0
-                        
-                        # Use the normal at this point for better sampling
-                        final_pos = [mid_x, mid_y, mid_z]
-                        
-                        # Apply tangent fit around this edge midpoint
-                        t_x, t_y, t_z, b_x, b_y, b_z = self._compute_tangent_basis(n_x, n_y, n_z)
-                        
-                        rand_t = random.uniform(-max_offset, max_offset)
-                        rand_b = random.uniform(-max_offset, max_offset)
-                        
-                        final_pos = [
-                            final_pos[0] + t_x * rand_t + b_x * rand_b,
-                            final_pos[1] + t_y * rand_t + b_y * rand_b,
-                            final_pos[2] + t_z * rand_t + b_z * rand_b
-                        ]
-                        
-                        return final_pos
-                        
-                except Exception as e:
-                    print("Edge sampling error:", str(e))
-            
-            # Fallback to tangent fit if edge sampling fails
-            return self._apply_tangent_fit(base_pos, n_x, n_y, n_z, max_offset)
-            
-        except Exception as e:
-            # Fallback to simple offset if anything fails
-            print(f"Edge sampling error: {str(e)}")
-            final_pos = [
-                base_pos[0] + random.uniform(-max_offset, max_offset),
-                base_pos[1] + random.uniform(-max_offset, max_offset),
-                base_pos[2] + random.uniform(-max_offset, max_offset)
-            ]
-        
-        return final_pos
-    
-    def _safe_material_name(self, obj):
-        """Generate safe material name avoiding namespace conflicts"""
-        # Get short name without hierarchy
-        short_name = cmds.ls(obj, shortNames=True)[0]
-        # Sanitize for Maya naming conventions
-        safe_name = "".join(c for c in short_name if c.isalnum() or c in "_")
-        return "scatter_mat_{}".format(safe_name.replace(":", "_"))
-    
+
+    # ------------------------------------------------------------------
+    #  MATERIALS
+    # ------------------------------------------------------------------
     def _create_unique_materials(self, source_objects):
-        """Create unique materials for each source object type"""
         material_dict = {}
-        
-        # Create a unique color for each source object
         colors = [
-            [1, 0, 0],    # Red
-            [0, 1, 0],    # Green  
-            [0, 0, 1],    # Blue
-            [1, 1, 0],    # Yellow
-            [1, 0, 1],    # Magenta
-            [0, 1, 1],    # Cyan
-            [1, 0.5, 0],  # Orange
-            [0.5, 0, 0.5], # Purple
-            [0.5, 0.5, 0], # Olive
-            [0, 0.5, 0.5]  # Teal
+            [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1],
+            [0, 1, 1], [1, 0.5, 0], [0.5, 0, 0.5], [0.5, 0.5, 0], [0, 0.5, 0.5]
         ]
-        
+
         for i, obj in enumerate(source_objects):
-            # Get the object name without any path components
+            if not cmds.objExists(obj):
+                continue
             obj_name = cmds.ls(obj, long=True)[0].split("|")[-1]
-            
-            # Create material name with unique identifier to prevent conflicts
             mat_name = "scatter_mat_{}_{}_{:.0f}".format(
-                obj_name.replace(":", "_"), 
-                i, 
-                time.time()
+                obj_name.replace(":", "_"), i, time.time()
             )
-            
-            # Use available color or cycle through if we have more objects than colors
-            color_index = i % len(colors)
-            color = colors[color_index]
-            
-            # Create blinn shader
+            color = colors[i % len(colors)]
+
             if not cmds.objExists(mat_name):
                 material = cmds.shadingNode('blinn', asShader=True, name=mat_name)
                 cmds.setAttr(material + ".color", color[0], color[1], color[2])
                 cmds.setAttr(material + ".ambientColor", color[0], color[1], color[2])
-                
-                # Create shading group
+
                 sg_name = mat_name + "SG"
                 if not cmds.objExists(sg_name):
                     sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=sg_name)
                     cmds.connectAttr(material + ".outColor", sg_name + ".surfaceShader")
-                
-                material_dict[obj] = {
-                    'material': material,
-                    'shading_group': sg_name
-                }
-                
-                # Track created materials for cleanup
+
+                material_dict[obj] = {'material': material, 'shading_group': sg_name}
                 self.created_materials.append(mat_name)
             else:
-                # If material already exists, get it from the dict
-                material_dict[obj] = {
-                    'material': mat_name,
-                    'shading_group': mat_name + "SG"
-                }
-        
+                material_dict[obj] = {'material': mat_name, 'shading_group': mat_name + "SG"}
+
         return material_dict
-    
+
     def _cleanup_scatter_materials(self):
-        """Clean up previously created scatter materials to prevent accumulation"""
-        # Use pattern matching to find all scatter materials
         try:
-            scatter_mats = cmds.ls("scatter_mat_*", materials=True)
-            for mat_name in scatter_mats:
+            for mat_name in self.created_materials:
                 if cmds.objExists(mat_name):
-                    try:
-                        # Get associated shading group
-                        sg_name = mat_name + "SG"
-                        if cmds.objExists(sg_name):
-                            cmds.delete(sg_name)
-                        # Delete material
-                        cmds.delete(mat_name)
-                    except Exception as e:
-                        print("Cleanup error for {}: {}".format(mat_name, str(e)))
+                    sg_name = mat_name + "SG"
+                    if cmds.objExists(sg_name):
+                        cmds.delete(sg_name)
+                    cmds.delete(mat_name)
         except:
-            pass  # Ignore errors in cleanup
-        
+            pass
         self.created_materials = []
-    
+
+    # ------------------------------------------------------------------
+    #  ERROR
+    # ------------------------------------------------------------------
     def _show_error(self, message):
-        """Show error message in Maya"""
         print("Simply Scatter Error:", message)
-        # Use warning instead of error for batch compatibility
         cmds.warning(message)
+
 
 # Run the tool
 SimplyScatter()
