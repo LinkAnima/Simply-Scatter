@@ -1,276 +1,149 @@
-# Simply Scatter User Guide
-## A Complete Guide to Creating Beautiful, Boundary-Safe Scatters
+# Simply Scatter: User Guide & Best Practices
 
-Welcome to Simply Scatter – your powerful tool for creating realistic, boundary-safe object distributions on meshes! Whether you're scattering grass, rocks, plants, or any other objects, this guide will help you master every feature.
+**Simply Scatter** is a fast, robust tool for scattering objects across a mesh in Maya. It replaces older, slower scripts by using modern Maya APIs (OpenMaya) for speed and a "Virtual Subdivision" logic to get high-density scatter without exploding your scene with actual geometry.
 
----
-
-## 🎯 What is Simply Scatter?
-
-Simply Scatter is a Maya plugin that scatters objects across a mesh surface with advanced control over distribution patterns, proximity avoidance, and visual quality. It's designed to be both powerful and user-friendly for artists working on complex scenes.
+This guide explains how to use the tool, what each setting does, and how to get the best results.
 
 ---
 
-## 🛠️ Getting Started
+## 1. How to Use (The Workflow)
 
-### Installation
-1. **Save the script** as `simply_scatter.py`
-2. **Open Maya**
-3. **In the Script Editor**, select "Python" as language
-4. **Run this code:**
-```python
-import sys
-sys.path.append('/path/to/your/script')
-import simply_scatter
-simply_scatter.SimplyScatter()
-```
+Using Simply Scatter is a three-step process: **Select**, **Configure**, **Run**.
 
-### Opening the Tool
-- Go to `Window > Scripts > Python` in Maya
-- Run the script above, or use the shelf button if you've added it
+### Step 1: Selection Order Matters
+You must select the objects you want to scatter and the surface they will land on.
+1.  Select the **Target Mesh** (the surface, e.g., a rock, a wall, the ground) **LAST**.
+2.  Select the **Source Objects** (the items to scatter, e.g., grass, rocks, debris) **FIRST**.
+3.  *Why this order?* The tool always assumes the **last selected object** is the surface. Everything else selected is treated as a "scatterer."
 
----
+> **Tip:** You can select multiple source objects! The tool will randomly pick from your selection for each placed item.
 
-## 📦 Basic Workflow
+### Step 2: Configure the Settings
+Open the **Simply Scatter** window. Read through the sections below to choose your settings.
 
-### Step 1: Select Your Objects
-1. **Select objects** you want to scatter (multiple objects supported)
-2. **Select your target mesh last** (the one to scatter on)
-3. **Example**: Select 5 different tree models, then select the terrain mesh
-
-### Step 2: Configure Settings
-Adjust parameters using the intuitive UI:
-- **Scene Settings**: Choose Y-Up or Z-Up for object orientation
-- **Scatter Parameters**: Set count and base scale
-- **Clustering Zones**: Group similar scatter locations together
-- **Virtual Subdivision**: Control how objects spread from vertices
-- **Rotation Variance**: Add natural randomness to rotations
-- **Proximity Detection**: Prevent overlapping objects
-
-### Step 3: Run Scatter
-Click the "RUN SCATTER" button and watch your objects appear!
+### Step 3: Run
+Click the green **RUN SCATTER** button.
+*   You will see a progress bar.
+*   The tool will create a new group named `SimplyScatter_Result_GRP_XXXX`.
+*   *Note:* If the mesh is large, the "Subdivision" phase may take a moment.
 
 ---
 
-## 🎛️ Detailed Feature Guide
+## 2. Understanding the Settings
 
-### Scene Settings
-**Object Up Axis**
-- Choose Y-Up or Z-Up based on your object orientation
-- This affects how scattered objects are aligned to the mesh surface
+### 🟢 Mesh Preparation
+*This section prepares the surface. It creates a hidden, temporary copy of your target mesh to calculate placement.*
 
-### Scatter Parameters
-**Object Count**
-- Controls how many objects will be scattered
-- Range: 1-5000 objects (default: 100)
+*   **Subdivision Levels (0-8):**
+    *   **0:** Uses your mesh as-is. Good for simple, low-poly meshes.
+    *   **1-2:** Adds smoothness/density. Recommended for most organic shapes.
+    *   **3+:** Very high density. Use only if you need scatter on very detailed or smooth curved surfaces (like a sphere or brain).
+*   **Keep Sharp Edges vs. Apply Smoothing:**
+    *   **Keep Sharp Edges (Default):** Preserves the original silhouette of your mesh. The scatter will land exactly on the original hard edges.
+    *   **Apply Smoothing:** Softens the mesh. Use this if you want scatter to land on a "smoothed" version of the surface (e.g., making a box look round for scatter).
+*   **Keep Subdivided Target:**
+    *   **Unchecked (Default):** Deletes the temporary hidden mesh after scattering. Keeps your scene clean.
+    *   **Checked:** Keeps the hidden mesh in the result group. Useful for debugging or if you want to re-use the subdivided surface later.
 
-**Base Scale**
-- Sets the default size of all scattered objects
-- Range: 0.01-20 units (default: 1.0)
+### 🟢 Scatter Parameters
+*   **Object Count:** How many objects you want to place.
+*   **Base Scale:** The default size of your objects.
+*   **Use Uniform Scale:**
+    *   **Checked:** All objects are exactly the same size (Base Scale).
+    *   **Unchecked:** Objects vary in size between **Min** and **Max Scale Factor**.
+    *   *Watch the "Current Range" text!* It updates in real-time as you drag the Min/Max sliders, showing you the percentage range (e.g., "50% to 150%").
 
-**Use Uniform Scale**
-- If checked, all objects get the same scale
-- If unchecked, each gets a random scale between 0.5x and 1.5x
+### 🟢 Clustering Zones
+*This creates the "organic" look, making objects gather in groups rather than scattering evenly.*
 
-### Clustering Zones
-**Enable Clustering**
-- Creates groups of nearby objects for natural-looking distribution
+*   **Enable Clustering:** Turn this **ON** for a natural look.
+*   **Number of Clusters (1-25):**
+    *   **Low (1-5):** Creates a few large "islands" of scatter.
+    *   **High (10-25):** Creates many small, tight groups.
+    *   *Note:* Increasing this number makes the scatter look more "broken up."
+*   **Tightness (0.0 - 1.0):**
+    *   **0.0 (Fully Spread):** Objects can land anywhere on the mesh, even far from the cluster centers.
+    *   **1.0 (Tight):** Objects are locked to the cluster centers.
+    *   *Sweet Spot:* **0.7 - 0.9** usually looks most natural.
 
-**Number of Clusters**
-- How many distinct grouping areas to create (default: 10)
+### 🟢 Slope Filtering
+*Prevents objects from landing on steep or vertical surfaces.*
 
-**Cluster Strength**
-- Controls how tightly clustered objects are:
-  - 0.0 = evenly spread across mesh
-  - 1.0 = all objects near cluster centers
+*   **Enable Slope Filter:** **ON** by default. This is highly recommended.
+*   **Angle (0-90°):**
+    *   The tool measures the angle of the surface normal relative to the Up Axis.
+    *   **60° (Default):** Only places objects on surfaces facing "upward." Prevents grass from growing sideways on cliffs or walls.
+    *   **90°:** Allows objects on vertical walls.
+    *   **0°:** Only places objects on perfectly flat, upward-facing surfaces.
 
-### Virtual Subdivision (Boundary Safe)
-**Enable Virtual Subdivision**
-- Adds extra randomness to prevent objects from sitting exactly on vertices
+### 🟢 Rotation Variance
+*Adds randomness to how the objects are oriented.*
 
-**Subdivision Method**
-- **Tangent Fit**: Objects move along surface tangent plane
-- **Edge Sampling**: Objects sample from connected mesh edges for better locality
+*   **Align to Surface Normal:**
+    *   **Checked (Recommended):** Objects stand upright relative to the surface slope. A rock on a hill will tilt to match the hill.
+    *   **Unchecked:** Objects use random global rotation (they might look "floating" or tilted strangely).
+*   **X/Y/Z Randomness:**
+    *   Adds a "wobble" on top of the normal alignment.
+    *   **Y Twist:** Usually set higher (e.g., 360) for a 360-degree spin.
+    *   **X/Z Tilt:** Usually set lower (e.g., 10-30) to keep objects mostly upright but slightly tilted for realism.
 
-**Spread Intensity (0-10)**
-- Controls how far objects can spread from original vertex:
-  - 0 = no spread
-  - 10 = maximum spread (up to 0.25 units)
+### 🟢 Proximity Detection
+*Prevents objects from overlapping each other.*
 
-### Rotation Variance
-Add natural randomness to object rotations:
+*   **Enable Collision Avoidance:** **ON** by default.
+*   **Min Distance:** The minimum space between object centers.
+    *   *Best Practice:* Set this to roughly **1x the size of your largest object**.
+*   **Retries per Object (1-10):**
+    *   If the tool tries to place an object in a spot that is too close to another, it retries up to this number of times.
+    *   If it fails all retries, it skips that object (resulting in "failed" count).
+    *   *Tip:* If you have many "failed" objects, increase **Min Distance** or decrease **Object Count**.
 
-**X Tilt Randomness**: How much objects tilt side-to-side (0-360°)
-**Y Twist Randomness**: How much objects twist around their axis (0-360°)  
-**Z Tilt Randomness**: How much objects tilt forward/backward (0-360°)
-
-### Proximity Detection
-Prevent scattered objects from overlapping:
-
-**Enable Collision Avoidance**
-- If checked, objects won't overlap
-
-**Min Distance**
-- Minimum distance between objects (default: 1.0)
-- Smaller values = more dense, more collisions
-
-**Max Retries per Obj**
-- How many attempts to place each object before giving up
-- Higher = better placement quality, slower execution
-
-### Advanced Features
-**Align to Surface Normal**
-- Objects align with mesh surface normals (default: ON)
-
-**Use Instancing (Faster)**
-- Creates faster duplicates for large counts (default: ON)
-
----
-
-## 🎨 Best Practices for Professional Results
-
-### For Realistic Natural Scattering:
-1. **Start with 50-200 objects** for small areas
-2. **Set Cluster Strength to 0.3-0.5** for natural grouping
-3. **Use Spread Intensity of 3-5** for subtle variation
-4. **Enable Proximity Detection** with Min Distance of 0.5-1.0
-
-### For Dense Scattering:
-1. **Use Count of 1000+** for large areas
-2. **Set Cluster Strength to 0.1-0.2** for even distribution
-3. **Use Spread Intensity of 1-3** to prevent clumping
-4. **Disable Proximity Detection** for performance (if acceptable)
-
-### For Specific Effects:
-**Grass Scattering:**
-- Count: 500-2000
-- Cluster Strength: 0.1-0.2
-- Spread Intensity: 2-3
-- Min Distance: 0.2-0.5
-
-**Rock Scattering:**
-- Count: 200-800
-- Cluster Strength: 0.4-0.6
-- Spread Intensity: 4-7
-- Min Distance: 0.5-1.0
-
-**Plant Scattering:**
-- Count: 100-500
-- Cluster Strength: 0.3-0.5
-- Spread Intensity: 3-5
-- Min Distance: 0.8-1.5
+### 🟢 Advanced Features
+*   **Use Instancing:**
+    *   **ON (Default):** Uses Maya's instancing. This is **much faster** and uses less memory.
+    *   **OFF:** Duplicates the actual geometry. Use this ONLY if you need to delete or edit individual scattered objects later.
+*   **Assign Unique Materials:**
+    *   If you selected **multiple different objects** (e.g., 3 types of grass), check this to assign a unique color to each type so you can tell them apart.
 
 ---
 
-## ⚡ Performance Tips
+## 3. Best Practices & Troubleshooting
 
-### For Large Scenes:
-1. **Use Instancing** - Much faster for high counts
-2. **Reduce Proximity Detection** - Turn off for very large scenes (but may cause overlaps)
-3. **Lower Spread Intensity** - Reduces computational overhead
-4. **Use fewer Clusters** - More clusters = more processing time
+### 💡 How to get the "Natural" Look
+1.  **Turn ON Clustering:** Never use 100% even scatter unless it's a specific stylistic choice. Clustering mimics nature.
+2.  **Use Slope Filtering:** Keep the Angle at **60°** or **45°**. This prevents objects from "dangling" on cliff faces.
+3.  **Vary the Scale:** Turn OFF "Use Uniform Scale" and set a range like **80% - 120%**. This adds visual variety.
+4.  **Add Rotation Wobble:** Keep "Align to Normal" ON, but add a small **Y Twist (e.g., 360)** and a small **X/Z Tilt (e.g., 15°)**.
 
-### For Quick Previews:
-1. **Set Count to 50-100** for testing
-2. **Disable Proximity Detection**
-3. **Use Lower Spread Intensity**
-4. **Test with a small subset of your objects**
+### ⚠️ Troubleshooting Common Issues
 
----
+| Problem | Solution |
+| :--- | :--- |
+| **"Selection Error"** | Make sure the **Target Mesh** is the **LAST** thing you selected. |
+| **Objects are "Floating"** | 1. Increase **Min Distance** in Proximity. <br> 2. Check **Slope Angle** (lower it to 30-45°). <br> 3. Ensure **Align to Normal** is ON. |
+| **Many "Failed" Objects** | The tool tried to place objects but ran out of space. <br> 1. Increase **Min Distance**. <br> 2. Decrease **Object Count**. <br> 3. Increase **Retries per Object** (max 10). |
+| **Scatter looks "Blocky"** | Increase **Subdivision Levels** to 2 or 3. This allows the tool to place objects on smoother curves. |
+| **Scene is Slow** | Ensure **Use Instancing** is ON. If it’s still slow, check your viewport shading mode (use "Shaded" not "Material"). |
+| **Objects look "Smoothed" too much** | If you used **Apply Smoothing**, try switching to **Keep Sharp Edges** and re-run. |
 
-## 🔧 Troubleshooting Common Issues
-
-### "Selection Error: Select objects to scatter, then the Target Mesh LAST"
-Make sure:
-- You have at least 2 selected objects
-- The mesh is selected last in the list
-
-### Objects are overlapping or too close together
-Try:
-- Increasing Min Distance value
-- Enabling Proximity Detection
-- Reducing Cluster Strength
-
-### Tool is running very slowly
-Try:
-- Turning off Proximity Detection for large counts
-- Using fewer objects
-- Reducing Spread Intensity
-
-### Materials not applying properly
-Check:
-- Make sure "Assign Unique Materials to Object Types" is enabled
-- Verify that your source objects have materials
-- Ensure you're using compatible object types
+### 🚀 Performance Tips
+*   **High Density?** Use **Subdivision Level 1 or 2**. Avoid 4+ unless necessary.
+*   **Many Clusters?** Keep **Number of Clusters** under 25. Higher numbers slow down the placement phase.
+*   **Complex Meshes?** The tool automatically subdivides a *temporary* copy. If your original mesh has 100k polygons, subdivision will take time. Keep your target mesh reasonably optimized (2k-10k polys is ideal).
 
 ---
 
-## 📈 Advanced Techniques
+## 4. Quick Start Cheat Sheet
 
-### Creating Natural Groupings:
-1. **Use Cluster Strength of 0.4-0.6**
-2. **Set Number of Clusters to 5-15** 
-3. **Enable Virtual Subdivision** with Spread Intensity of 3-5
-4. This creates natural-looking clusters like nature does
+For a **quick, natural grass/rock scatter**:
 
-### Scattering on Complex Meshes:
-1. **Start with low count** (50-100) for testing
-2. **Use smaller Min Distance** (0.2-0.5)
-3. **Enable Proximity Detection**
-4. **Test with one object type first**
+1.  **Select** your ground mesh last, grass objects first.
+2.  **Mesh Prep:** Subd Level **1**, Keep Sharp Edges **ON**.
+3.  **Scatter:** Count **500**, Uniform Scale **OFF**, Range **80%-120%**.
+4.  **Clustering:** Enable **ON**, Clusters **15**, Tightness **0.85**.
+5.  **Slope:** Enable **ON**, Angle **60°**.
+6.  **Rotation:** Align **ON**, Y Twist **360**, X/Z Tilt **15**.
+7.  **Proximity:** Min Dist **1.0**, Retries **10**.
+8.  **Click RUN.**
 
-### Optimizing Large Scenes:
-1. **Create multiple scatter passes** with different settings
-2. **Use instance groups** for similar objects
-3. **Apply different material types** to reduce memory usage
-
----
-
-## 🎨 Tips for Professional Results
-
-### For Maximum Realism:
-- **Combine multiple scatter passes**: Use different settings to create depth and variety
-- **Vary object scales**: Use uniform scale off for natural look
-- **Use different object types**: Mix similar but distinct objects
-- **Adjust rotation variance**: Add subtle randomness for organic feel
-
-### For Efficient Workflow:
-- **Save your favorite settings** in the UI
-- **Use presets** for common scattering tasks (grass, rocks, plants)
-- **Test with low counts first** before running full scene
-- **Use undo/redo** to fine-tune results
-
----
-
-## 🧠 Pro Tips from Industry Artists
-
-### Real-World Usage:
-- **Grass**: 1000+ objects, low cluster strength, small spread
-- **Rocks**: 500-1000 objects, high cluster strength, moderate spread  
-- **Trees**: 50-200 objects, high cluster strength, large spread
-- **Foliage**: 2000+ objects, low cluster strength, small spread
-
-### Quality vs Performance:
-- **Quality Mode**: Enable proximity detection, use high counts
-- **Speed Mode**: Disable proximity, reduce count, use fewer clusters
-- **Balance**: Find your sweet spot based on scene complexity
-
-### Workflow Optimization:
-1. **Start with a simple test run** (50 objects)
-2. **Adjust settings incrementally**
-3. **Use the preview effect to check results**
-4. **Iterate until you get desired look**
-
----
-
-## 📝 Final Notes
-
-Simply Scatter is designed to handle everything from small-scale detail work to large production environments. The key to success is understanding how each parameter affects your final result.
-
-**Remember**: 
-- Small changes in parameters can create dramatically different results
-- Always test with a few objects first
-- Use the undo feature to experiment safely
-- Don't be afraid to combine multiple scatter passes for complex effects
-
-Happy scattering! 🌿
+Enjoy your scatter! 🌿🪨
